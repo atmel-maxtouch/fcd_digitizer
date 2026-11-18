@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Microchip ATFCD52 Fast Capacitive Digitizer
+#
+
+config FCD52
+	tristate
+
+config FCD52_I2C
+	tristate "Microchip ATFCD52 Fast Capacitive Digitizer (I2C control)"
+	depends on I2C
+	select FCD52
+	help
+	  Say yes here to build support for the I2C control interface of the
+	  Microchip ATFCD52 fast capacitive digitizer. The I2C interface uses
+	  the Object-Based Protocol to configure the device; measurement data
+	  is delivered over the separate SPI frame data interface.
+
+	  To compile this driver as a module, choose M here: the modules will
+	  be called fcd52-core and fcd52-i2c.
+
+config FCD52_FRAME_DATA
+	tristate "Microchip ATFCD52 SPI frame data interface"
+	depends on OF
+	depends on DMADEVICES
+	select FCD52
+	select IIO_BUFFER
+	select IIO_KFIFO_BUF
+	help
+	  Say yes here to build support for the SPI frame data interface of
+	  the Microchip ATFCD52 fast capacitive digitizer.
+
+	  The digitizer drives this interface as the SPI host, so the SoC SPI
+	  block is placed in client mode and a cyclic DMA transfer captures
+	  the sample frames continuously. The SPI block used for frame data
+	  is owned by this driver and must not also be claimed by a generic
+	  SPI controller driver.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called fcd52-frame-data.

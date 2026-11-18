@@ -1,0 +1,457 @@
+Microchip ATFCD52 Fast Capacitive Digitizer - Linux driver
+==========================================================
+
+This repository contains the Linux driver for the Microchip ATFCD52 fast
+capacitive digitizer tested on the SAMA7D65 Curiosity board.
+
+The FCD device has two interfaces and is supported by separate modules;
+
+  fcd52-core.ko        Core: Object-Based Protocol (OBP) support, the
+                       configuration, firmware update paths, and the
+                       sysfs interface.
+  fcd52-i2c.ko         I2C control interface and binds to the device tree node
+                       "microchip,atfcd52".
+  fcd52-frame-data.ko  SPI frame data interface. The digitizer is the SPI
+                       host and the SAMA7D65 FLEXCOM SPI block is the client.
+                       Binds to "microchip,atfcd52-frame-data".
+
+1. Files
+--------
+
+  Files should be copied to its own folder "fcd52" in the /drivers/iio/adc/
+  directory.
+  
+  fcd52-core-main.c   OBP core, sysfs, update paths
+  fcd52-cfg.c/.h      OBP_RAW configuration file parser
+  fcd52-i2c.c         I2C transport and probe (fcd52-i2c.ko)
+  fcd52-spi.c         SPI frame data driver (fcd52-frame-data.ko)
+  fcd52.h             Shared definitions
+  Kconfig, Makefile   Build configuration
+
+Related files outside this directory:
+
+  In the Documentation/devicetree/bindings/iio/adc/ directory:
+     
+	microchip,atfcd52.yaml
+	microchip,atfcd52.example.dts
+	microchip,atfcd52-frame-data.yaml
+	microchip,atfcd52.frame-data.example.dts
+	 
+  In the dt-overlay-at91 repository:
+  
+    sama7d65_curiosity/sama7d65_curiosity_atfcd52.dtso
+	sama7d65_curiosity/sama7d65_curiosity_spi.dtso
+	sama7d65_curiosity.its      (FIT image configurations)
+	 
+  In the fcd52/tools directory:
+	tools/fcd52_drain.c         (buffer test program)
+
+
+2. Configuration options
+------------------------
+
+The options are in the Linux configuration under
+
+  Device Drivers -> Industrial I/O -> Analog to digital converters
+      -> Microchip ATFCD52 Fast Capacitive Digitizer (I2C control)
+      -> Microchip ATFCD52 SPI frame data interface
+
+  CONFIG_FCD52            (selected automatically; the core)
+  CONFIG_FCD52_I2C        I2C control interface. Depends on I2C.
+  CONFIG_FCD52_FRAME_DATA SPI frame data interface. Depends on OF and
+                          DMADEVICES. Selects IIO_BUFFER and IIO_KFIFO_BUF.
+
+For a module build, set both as "M":
+
+  CONFIG_FCD52=m
+  CONFIG_FCD52_I2C=m
+  CONFIG_FCD52_FRAME_DATA=m
+
+The SAMA7D65 defconfig already enables DMA and IIO. Check that
+CONFIG_OF=y and CONFIG_DMADEVICES=y are set in the "sama7_defconfig" file.
+
+Driver-level settings are taken from the device tree, not the kernel
+configuration:
+
+  microchip,cfg-name   Configuration file loaded by update_cfg. Default
+                       "fcd52.cfg", looked up with request_firmware() in
+                       /lib/firmware (or the firmware search path).
+
+The firmware image used by the update_fw() is defaulted to "fcd52.fw".
+The file must be a plain binary image. Convert the file using:
+
+  xxd -r -p fcd52_10AA.enc > fcd52.fw
+
+
+3. Building
+-----------
+
+The driver is built as part of the kernel tree. It needs the SAMA7D65 ARM
+toolchain, the same one the kernel was configured with.
+
+  cd fcd52_digitizer
+  make ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- \
+       M=drivers/iio/adc/fcd52 modules
+
+This builds fcd52-core.ko, fcd52-i2c.ko and fcd52-frame-data.ko in
+drivers/iio/adc/fcd52/. Copy them to the board (for example with scp) to
+load them for test.
+
+To build the device tree overlays, point KERNEL_DIR at the kernel tree or
+create a an environmental variable.
+  
+  export KERNEL_DIR=/path/to/fcd52_digitizer
+  export KERNEL_BUILD_DIR=/path/to/fcd52_digitizer
+
+  cd dt-overlay-at91
+  make sama7d65_curiosity_dtbos
+
+To build the boot image (FIT) that contains the overlays, copy zImage and
+the base DTB into the dt-overlay-at91 directory, then:
+
+  make sama7d65_curiosity.itb
+
+The FIT references ./zImage and ./at91-sama7d65_curiosity.dtb by relative
+path.
+  
+  More information can be found below regarding the device tree overlay files.
+  
+  https://github.com/atmel-maxtouch/dt-overlay-at91
+
+The test program is built the same way for the board:
+
+  arm-none-linux-gnueabihf-gcc -O2 -Wall -Wextra -o fcd52_drain fcd52_drain.c
+
+
+4. Device tree and overlays
+---------------------------
+
+4.1 I2C control node (sama7d65_curiosity_atfcd52.dtso)
+
+  digitizer@4b {
+      compatible = "microchip,atfcd52";
+      reg = <0x4b>;
+      interrupts = <PIN_PA20 IRQ_TYPE_LEVEL_LOW>;   /* CHG */
+      vdd-supply = ...;
+      avdd-supply = ...;
+	  microchip,cfg-name = "fcd52.cfg";
+  };
+
+The CHG line is active low and must use IRQ_TYPE_LEVEL_LOW. The reg value
+is the application address; the bootloader address is derived from it.
+
+  Available address are:
+      Reg value: 0x4A-0x52.
+
+4.2 SPI frame data node (sama7d65_curiosity_spi.dtso)
+
+  &flx4 {
+      atfcd52_frame: atfcd52-frame-data@400 {
+          compatible = "microchip,atfcd52-frame-data";
+          reg = <0x400 0x200>;               /* SPI block inside FLEXCOM4 */
+          clocks = <&pmc PMC_TYPE_PERIPHERAL 38>;
+          dmas = <&dma0 AT91_XDMAC_DT_PERID(13)>;   /* FLEXCOM4 RX */
+          dma-names = "rx";
+          pinctrl-names = "default";
+          pinctrl-0 = <&pinctrl_spi4_test>;
+          microchip,control = <&atfcd52>;    /* see note below */
+          status = "okay";
+      };
+  };
+
+The generic spi4 node is disabled. The frame data driver owns the block
+directly, because the digitizer is the SPI host and the kernel SPI core
+cannot run a block in client mode.
+
+Pin assignment for the frame data interface (FLEXCOM4):
+
+  PA15  SS    (NPCS0, client select from the digitizer)
+  PA16  SCK   (SPCK, driven by the digitizer)
+  PA17  MISO  (not used by the digitizer; leave unconnected)
+  PA18  MOSI  (digitizer data into the SoC)
+  
+  The SAMA7D65 Curiosity board's miktroBUS2 J26 SPI header was used for this test.
+  The CS_PA15 is supplied from the miktroBUS1 header,
+  as this pin is configured an a SS INPUT in SPI client mode.
+
+The overlay's pinmux (pinctrl_spi4_test) must be attached to the frame data
+node. If it is not, the pins stay GPIO inputs and the block never sees SS.
+
+Note: microchip,control is a phandle, so the frame data overlay can only
+reference the I2C node when both overlays are applied in the same FIT
+configuration. The atfcd52 overlay's label (atfcd52) must be visible.
+
+4.3 Boot configurations (FIT)
+
+U-Boot selects an overlay set with "bootm <addr>#<config>". The configurations
+in sama7d65_curiosity.its are:
+
+  atfcd52      I2C control interface only
+  spi          SPI overlay only
+  atfcd52_eth  Base board with the I2C digitizer, the SPI overlay and the
+               LAN8840 PHY (the usual boot configuration)
+
+Use the combined configuration (atfcd52_eth) for the complete system. Note
+that overlays after "#" must name configuration nodes, not feature names.
+
+Set the boot command, for example:
+
+  setenv bootcmd 'nand read 0x63000000 0x00180000 <size>; bootm 0x63000000#atfcd52_eth'
+  saveenv
+
+Replace <size> with the size of the image in hex. Check it with mkimage -l.
+
+
+5. Installing the modules
+-------------------------
+
+Modules load in dependency order: fcd52-core, then fcd52-i2c, then
+fcd52-frame-data. depmod works out the order automatically if the modules
+are installed under /lib/modules.
+
+5.1 Manual, for testing
+
+Copy the three .ko files to the board, then load them in order:
+
+  insmod fcd52-core.ko
+  insmod fcd52-i2c.ko          # binds to the digitizer node
+  insmod fcd52-frame-data.ko   # binds to the frame data node
+
+Check the load with dmesg:
+
+  dmesg | grep -i atfcd52
+
+A successful I2C probe logs the family, the object table and the T700
+layout. A successful frame data probe logs:
+
+  atfcd52-frame-data ...: T700 layout 10x10, 202 bytes/frame
+  atfcd52-frame-data ...: flexcom SPI client, 10x10 nodes, 202 bytes/frame
+
+To unload, remove the modules in reverse order:
+
+  rmmod fcd52-frame-data
+  rmmod fcd52-i2c
+  rmmod fcd52-core
+
+Unbind the device before rmmod if the module is still bound:
+
+  echo <device> > /sys/bus/platform/drivers/atfcd52-frame-data/unbind
+
+5.2 Installed in the root filesystem
+
+Copy the modules into the module tree and rebuild the dependency list:
+
+  make ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- \
+       INSTALL_MOD_PATH=/path/to/rootfs modules_install
+  depmod -a                    # on the board, or with -b on the host
+
+Then they are found by name. The device tree match (the I2C node and the
+frame data node) loads each module automatically, so no explicit insmod is
+needed once the overlay is applied.
+
+5.3 Loading at boot
+
+If modules are not autoloaded from the device tree, list them in
+/etc/modules-load.d/fcd52.conf in the order below, one per line:
+
+  fcd52-core
+  fcd52-i2c
+  fcd52-frame-data
+
+systemd reads this file at boot, and modprobe loads each name along with its
+dependencies.
+
+5.4 Load order and dependencies
+
+The modules depend on each other in two ways:
+
+  - Symbol dependency. fcd52-i2c.ko and fcd52-frame-data.ko call functions
+    exported by fcd52-core.ko, so fcd52-core must load first. modprobe
+    resolves this from the installed module dependencies (depmod). insmod
+    does not, so it fails with unresolved symbols if the core is missing.
+
+  - Runtime dependency. The frame data driver reads the T700 frame layout
+    through the I2C control device. If that device is not bound yet, the
+    frame data probe is deferred and retried later, so the modules can load
+    in either order. A deferred probe prints nothing by default. If the
+    frame data device never appears, check
+    /sys/kernel/debug/devices_deferred.
+
+The drivers do not declare soft dependencies. To make the order explicit
+when loading with modprobe, add this to /etc/modprobe.d/fcd52.conf:
+
+  softdep fcd52-frame-data pre: fcd52-i2c
+  softdep fcd52-i2c pre: fcd52-core
+
+modprobe honours softdep. insmod ignores it, so when loading by hand, insert
+the modules in the order in section 5.1.
+
+To set the frame data node's status at boot, the overlay must already be in
+the running device tree. Confirm with:
+
+  ls /sys/devices/platform/soc/e2018000.flexcom/e2018400.atfcd52-frame-data/
+
+If that directory is missing, the overlay is not applied and the frame data
+module will not bind.
+
+5.5 Firmware and configuration files
+
+Put the files in /lib/firmware (or the firmware path set in the kernel):
+
+  fcd52.cfg    OBP_RAW configuration file (V1 or V4). Applied by update_cfg.
+  fcd52.fw     Firmware binary. Applied by update_fw.
+
+
+6. Using the driver
+-------------------
+
+6.1 Control interface (I2C)
+
+The control device is at /sys/bus/i2c/devices/2-004b (bus number and
+address depend on the board). Its attributes include:
+
+  fw_version, hw_version, config_crc, drvr_version
+  debug_v2_enable, debug_msg, debug_msg_lost, debug_notify
+  bl_status            Bootloader status (read-only)
+  update_cfg           Write "default" or a file name to apply a configuration
+  update_fw            Write "fcd52.fw" (or another name) to update firmware
+  mem_access           Raw binary access to the device memory map
+
+Apply a configuration:
+
+  echo default > /sys/bus/i2c/drivers/atfcd52/2-004b/update_cfg
+
+Update the firmware (the device must be running or in bootloader mode):
+
+  echo fcd52.fw > /sys/bus/i2c/drivers/atfcd52/2-004b/update_fw
+
+The firmware update enters bootloader mode, sends the image as frames, waits
+about 1 s for the application to start, re-reads the information block and
+re-applies fcd52.cfg if it is present.
+
+The update does not check the version. Every update is programmed.
+
+6.2 Frame data interface (SPI)
+
+The IIO device for the frame data interface is the one with a matrix_xsize
+attribute:
+
+  /sys/bus/iio/devices/iio:deviceN/
+
+Attributes:
+
+  matrix_xsize, matrix_ysize   Geometry from the T700 layout
+  dropped_frames               Frames failing the Frame ID check
+  overflow_frames              Frames rejected because the buffer was full
+  dma_periods                  DMA period callbacks since capture start
+  id_match_periods             Periods whose first and last byte match
+  sync_locks, sync_losses      Frame sync locks and lost locks
+  lag_max, lag_overruns        DMA callback lag, in periods
+  last_frame                   Hex dump of the most recent raw period
+  raw_capture                  Binary dump of the captured periods
+  raw_capture_hex              The same periods as text, one 0xNN per line
+
+Captured data is read through the buffer:
+
+  /dev/iio:deviceN
+
+Samples are 16-bit little-endian signed values, one per node, so a 10x10
+matrix gives 200 bytes per scan.
+
+6.3 Test program
+
+tools/fcd52_drain reads the buffer and reports the frame count and loss
+counters:
+
+  ./fcd52_drain                  # 4096 scans, until Ctrl-C
+  ./fcd52_drain -t 5             # stop after 5 seconds
+  ./fcd52_drain -l 512 -o out.bin -d 2
+
+Options:
+
+  -l length   Buffer length in scans (default 4096)
+  -t seconds  Stop after this many seconds
+  -o file     Also write the sample data to file
+  -d N        Use /dev/iio:deviceN (default: the device with matrix_xsize)
+
+
+7. Logging
+----------
+
+The driver logs through dev_info() during the normal path, so the messages
+show with the default console log level. Useful lines:
+
+  atfcd52 ...: application 0x4b, bootloader 0x27
+  atfcd52 ...: Family: 0xAA ... Objects: 25
+  atfcd52-frame-data ...: capture started: SR=... SPIENS=1 ...
+  atfcd52-frame-data ...: frame sync locked at stream position N
+  atfcd52-frame-data ...: capture stopped: NSSR edges N, RDRF seen N
+  atfcd52-frame-data ...: block error SR=... (OVRES ... MODF ...)
+
+Check the boot log for the probe errors, and dmesg after each capture.
+
+
+8. Status and known limits
+--------------------------
+
+I2C control interface
+  Probe, configuration (update_cfg), firmware update (update_fw) and the
+  bootloader-only recovery path have been exercised on the SAMA7D65 board.
+  The firmware update path has been run to completion.
+
+SPI frame data interface
+  Frames are received from the digitizer. A 4 s SS/SCK/MOSI capture shows
+  1355 full frames with matching IDs and a steady 2.589 ms frame period.
+
+  The driver's frame sync is not yet reliable. Known points:
+
+  - The receive path uses a fixed 202-byte DMA period. A frame cut short by
+    the device (17 bytes was observed) shifts every later frame boundary.
+    The planned fix is to frame each transaction by its SS window (NSSR).
+  - The digitizer restarts its frame counter after a pause, and this has
+    been seen once (frame 731 in a 4 s capture, followed by a 137 ms gap).
+    The driver does not yet handle an ID discontinuity.
+  - The DMA callback runs a few periods behind the engine (up to 3 periods
+    observed). The ring is 16 periods to cover this margin.
+  - SS glitches shorter than 16 ns appear in the analyzer captures as
+    zero-length transactions. Ignore them when decoding.
+
+  The raw capture (raw_capture, raw_capture_hex) is the best reference for
+  checking the frame stream. Compare it against an analyzer capture taken at
+  the same time.
+
+Test records are kept with the driver in the working tree; the capture
+files named 4s_capture.csv, 4sec_v2.csv, 4sec_v3.csv and
+Reset_2_touches.csv are from the analyzer.
+
+
+9. Troubleshooting
+------------------
+
+Module does not load: "Invalid module format"
+  The module was built for a different target. Rebuild with ARCH=arm and
+  CROSS_COMPILE set to the board's toolchain.
+
+I2C probe fails: "application 0x4b, bootloader 0x27" followed by
+  "application not answering"
+  The device is not answering on its application address. If the device is
+  in bootloader mode, the driver still registers update_fw. Check bl_status.
+
+Frame data does not bind: no atfcd52-frame-data directory
+  The SPI overlay is not applied. Check the FIT configuration with
+  atfcd52_eth, and that the frame data node appears under flx4 in the
+  device tree.
+
+Frame data binds but no frames
+  Check that the SS line is on PA15 and wired to the digitizer's SS, and that
+  the pinctrl_spi4_test pinmux is attached to the frame data node. Then run
+  fcd52_drain while touching the screen, and check that NSSR edges is
+  non-zero in the capture stopped line.
+
+Frame data: "cannot create duplicate filename ... dma:rx" on insmod
+  The module was loaded while the previous instance was still bound. Unbind
+  the device, then remove and load the module again.
+
+update_fw fails with "bootloader did not reach WAITING_CMD"
+  The device is not in bootloader mode, or it is not answering on the
+  bootloader address. Check bl_status and the I2C address mapping.

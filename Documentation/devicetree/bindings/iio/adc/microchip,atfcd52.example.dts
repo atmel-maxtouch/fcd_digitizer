@@ -1,0 +1,45 @@
+
+/dts-v1/;
+/plugin/; // silence any missing phandle references
+
+/{
+    compatible = "foo";
+    model = "foo";
+    #address-cells = <1>;
+    #size-cells = <1>;
+
+
+    example-0 {
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        
+        interrupt-parent = <&fake_intc0>;
+        fake_intc0: fake-interrupt-controller {
+            interrupt-controller;
+            #interrupt-cells = < 2 >;
+        };
+
+
+        #include <dt-bindings/gpio/gpio.h>
+        #include <dt-bindings/interrupt-controller/irq.h>
+        
+        i2c {
+            #address-cells = <1>;
+            #size-cells = <0>;
+        
+            digitizer@4a {
+                compatible = "microchip,atfcd52";
+                reg = <0x4a>;
+                interrupt-parent = <&gpio>;
+                interrupts = <23 IRQ_TYPE_LEVEL_LOW>;
+                reset-gpios = <&gpio 24 GPIO_ACTIVE_LOW>;
+                vdd-supply = <&reg_3v3>;
+                avdd-supply = <&reg_3v3>;
+                microchip,cfg-name = "fcd52.cfg";
+            };
+        };
+
+    };
+};
+

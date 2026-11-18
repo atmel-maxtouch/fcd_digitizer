@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ *  Device Tree overlay for sama7d65-curiosity board to add the Microchip
+ *  ATFCD52 fast capacitive digitizer on I2C0, alongside the maXTouch
+ *  touchscreen at 0x4a.
+ *
+ *  The ATFCD52 sits on the same I2C bus as the touchscreen at address 0x4b
+ *  (ADDSEL pins set accordingly). Its CHG line is wired to PA20 and is active
+ *  low. The sample data path is the separate SPI frame data interface, which
+ *  is not described in this overlay.
+ *
+ *  Copyright (c) 2026 Microchip Technology Inc. and its subsidiaries
+ *
+ *  Author: Michael Gong <michael.gong@microchip.com>
+ *
+ */
+/dts-v1/;
+/plugin/;
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/mfd/atmel-flexcom.h>
+#include <dt-bindings/pinctrl/at91.h>
+#include "sama7d65-pinfunc.h"
+
+/*
+ * PA20 is also used as FLEXCOM4 chip select 3 by the GMAC switch overlays
+ * (sama7d65_curiosity_gmac_*.dtso). Those cannot be combined with this one.
+ */
+
+&flx0 {
+	atmel,flexcom-mode = <ATMEL_FLEXCOM_MODE_TWI>;
+	status = "okay";
+};
+
+&i2c0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-names = "default", "gpio";
+	pinctrl-0 = <&pinctrl_i2c0_default>;
+	pinctrl-1 = <&pinctrl_i2c0_gpio>;
+	sda-gpios = <&pioa PIN_PC6 GPIO_ACTIVE_HIGH>;
+	scl-gpios = <&pioa PIN_PC7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+	i2c-analog-filter;
+	i2c-digital-filter;
+	i2c-digital-filter-width-ns = <35>;
+	status = "okay";
+
+	atfcd52: digitizer@4b {
+		compatible = "microchip,atfcd52";
+		reg = <0x4b>;
+		interrupt-parent = <&pioa>;
+		interrupts = <PIN_PA20 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_atfcd52_irq>;
+		vdd-supply = <&vdd_3v3>;
+		avdd-supply = <&vdd_3v3>;
+	};
+};
+
+&pioa {
+	/*
+	 * I2C0 pin groups, as defined in sama7d65_curiosity_lvds_newvision.dtso.
+	 * They are repeated here so this overlay does not depend on that one
+	 * being applied first.
+	 */
+	pinctrl_i2c0_default: i2c0-default {
+		pinmux = <PIN_PC7__FLEXCOM0_IO0>,
+			<PIN_PC6__FLEXCOM0_IO1>;
+		bias-pull-up;
+	};
+
+	pinctrl_i2c0_gpio: i2c0-gpio {
+		pinmux = <PIN_PC7__GPIO>,
+			 <PIN_PC6__GPIO>;
+		bias-disable;
+	};
+
+	pinctrl_atfcd52_irq: atfcd52-irq {
+		pinmux = <PIN_PA20__GPIO>;
+		bias-pull-up;
+		input-debounce = <1>;
+	};
+};

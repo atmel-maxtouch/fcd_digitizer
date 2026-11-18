@@ -1,0 +1,29 @@
+
+/dts-v1/;
+/plugin/; // silence any missing phandle references
+
+/{
+    compatible = "foo";
+    model = "foo";
+    #address-cells = <1>;
+    #size-cells = <1>;
+
+
+    example-0 {
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        
+
+        frame-data@f8000000 {
+            compatible = "microchip,atfcd52-frame-data";
+            reg = <0xf8000000 0x100>;
+            clocks = <&pmc 2>;
+            dmas = <&dma0 7>;
+            dma-names = "rx";
+            microchip,matrix-size = <4 3>;
+        };
+
+    };
+};
+

@@ -1,0 +1,23 @@
+# Kbuild outputs
+*.o
+*.a
+*.ko
+*.mod
+*.mod.c
+*.cmd
+modules.order
+Module.symvers
+
+# Device tree build outputs
+*.dtb
+*.dtbo
+*.pre.dtso
+*.itb
+
+# Local build and test output
+tools/fcd52_drain
+
+# Analyzer captures, datasheets and logs
+*.csv
+*.pdf
+*.log

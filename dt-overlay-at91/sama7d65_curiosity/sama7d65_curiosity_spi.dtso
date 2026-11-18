@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ *  Device Tree overlay for sama7d65-curiosity board to bring up the SPI
+ *  controller on FLEXCOM4 (spi4) for test wiring to the 40-pin Raspberry Pi
+ *  header.
+ *
+ *  Wiring (Table 3-26, 40-Pin GPIO Connector):
+ *    MOSI  PA18  pin 19
+ *    MISO  PA17  pin 21
+ *    SCK   PA16  pin 23
+ *    SS    PA15  pin 22 (FLEXCOM4_IO3/NPCS0, client select from the digitizer)
+ *
+ *  PA20 (RPi pin 26, CS1) is deliberately not claimed here. It is the I2C
+ *  interrupt line in sama7d65_curiosity_atfcd52.dtso, and CS1 is shared with
+ *  the GMAC1 SPI chip select, so the GMAC overlays cannot be combined with it.
+ *
+ *  The mikroBUS SPI lines share PA16 to PA18 with this bus. Do not drive
+ *  mikroBUS and the RPi header at the same time.
+ *
+ *  Copyright (c) 2026 Microchip Technology Inc. and its subsidiaries
+ *
+ *  Author: Michael Gong <michael.gong@microchip.com>
+ *
+ */
+/dts-v1/;
+/plugin/;
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/clock/at91.h>
+#include <dt-bindings/dma/at91.h>
+#include <dt-bindings/mfd/atmel-flexcom.h>
+#include <dt-bindings/pinctrl/at91.h>
+#include "sama7d65-pinfunc.h"
+
+&flx4 {
+	atmel,flexcom-mode = <ATMEL_FLEXCOM_MODE_SPI>;
+	status = "okay";
+};
+
+/*
+ * The SPI4 block is driven by the frame data driver, not the SPI core: the
+ * digitizer is the SPI host, so the block must be a client, which the host
+ * SPI driver cannot do. Keep the generic spi4 node disabled, and claim its
+ * registers from the frame data node below.
+ */
+&spi4 {
+	status = "disabled";
+};
+
+/*
+ * Frame data interface, on the SPI4 registers (spi@400 under FLEXCOM4). The
+ * frame data driver owns the block directly. Geometry must match the T700
+ * configuration; the I2C driver writes it, and the SPI driver reads it back.
+ */
+&flx4 {
+	/* FLEXCOM children use one address and one size cell (see sama7d65.dtsi) */
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	atfcd52_frame: atfcd52-frame-data@400 {
+		compatible = "microchip,atfcd52-frame-data";
+		reg = <0x400 0x200>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_spi4_test>;
+		clocks = <&pmc PMC_TYPE_PERIPHERAL 38>;
+		dmas = <&dma0 AT91_XDMAC_DT_PERID(13)>;
+		dma-names = "rx";
+		/* T700 layout is read from the control driver, not repeated here */
+		microchip,control = <&atfcd52>;
+		status = "okay";
+	};
+};
+
+&pioa {
+	pinctrl_spi4_test: spi4-test {
+		pinmux = <PIN_PA18__FLEXCOM4_IO0>,	/* MOSI, RPi pin 19 */
+			 <PIN_PA17__FLEXCOM4_IO1>,	/* MISO, RPi pin 21 */
+			 <PIN_PA16__FLEXCOM4_IO2>,	/* SCK,  RPi pin 23 */
+			 <PIN_PA15__FLEXCOM4_IO3>;	/* SS,   RPi pin 22 (NPCS0) */
+		bias-disable;
+	};
+};
